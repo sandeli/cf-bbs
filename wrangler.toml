@@ -4,10 +4,7 @@ main = "src/index.ts"
 compatibility_date = "2025-09-01"
 workers_dev = true
 
-# 自定义域名（自动创建 DNS 记录与证书，国内可直连）
-[[routes]]
-pattern = "forum.lovou.pw"
-custom_domain = true
+# 本期不绑自定义域名，只用 workers.dev 地址（cf-bbs.sandeli79.workers.dev）
 
 # 静态资源（CSS/JS/图标）由 Workers Assets 直接返回，不消耗 Worker 调用
 [assets]
@@ -15,8 +12,8 @@ directory = "./public"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "cf-bbs"
-database_id = "d81f0f8b-458e-4016-81ef-097b389270d2"
+database_name = "cf-bbs-db"
+database_id = "276f0cf0-e028-42c3-ad91-e1c44f936881"
 migrations_dir = "migrations"
 
 [vars]
@@ -24,11 +21,10 @@ SITE_NAME = "Nexus"
 SITE_TAGLINE = "轻量 · 开放 · 属于你的社区"
 ALLOW_REGISTRATION = "true"
 # PBKDF2 迭代次数。免费版 Workers CPU 上限较低时可下调到 50000
-PASSWORD_ITERATIONS = "100000"
+PASSWORD_ITERATIONS = "50000"
 
 # 外部图床（Sanyue ImgHub / CloudFlare-ImgBed 系）：编辑器里上传图片后自动插入 Markdown
-# 同时配置 IMGBED_AUTH_CODE（secret）才会启用；删掉本行则关闭图片上传入口
-IMGBED_URL = "https://img.lovou.eu.org"
+# 本期不配图床：不设 IMGBED_URL（图片上传入口关闭，发帖只能贴外链图）；将来要启用时在此加 IMGBED_URL 并配 IMGBED_AUTH_CODE（secret）
 # IMGBED_FOLDER = "bbs"
 # IMGBED_CHANNEL = "telegram"
 # IMGBED_MAX_MB = "8"
@@ -37,7 +33,7 @@ IMGBED_URL = "https://img.lovou.eu.org"
 
 # 邮箱验证（Resend）
 # 邮件里的链接默认取请求 origin；自定义域名时建议显式设置 SITE_URL
-SITE_URL = "https://forum.lovou.pw"
+SITE_URL = "https://cf-bbs.sandeli79.workers.dev"
 # 设为 "true" 后，未验证邮箱的用户不能发帖 / 回复（默认只提示不拦截）
 REQUIRE_EMAIL_VERIFICATION = "true"
 
