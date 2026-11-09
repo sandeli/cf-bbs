@@ -18,7 +18,57 @@ const ALLOWED = new Set([
   'strong', 'b', 'em', 'i', 'del', 's',
   'blockquote', 'ul', 'ol', 'li',
   'pre', 'code', 'a', 'img',
+  // span 仅作为文字颜色载体存活：buildAttrs 只放行受控的 style="color:…"
+  'span',
 ]);
+
+/* ------------------------------------------------------------------ 文字颜色
+ * 颜色是 style 属性里唯一开的口子，边界如下：
+ * - 只有 <span>（及被映射成 span 的 <font color>）能承载颜色，其余元素 style 全剥；
+ * - style 里只提取 color 一条声明，position/background/url()/expression 等一律丢弃；
+ * - 颜色值只接受 #rgb / #rrggbb、rgb()/rgba()（三通道 0–255，丢弃 alpha）、
+ *   以及下方命名色表，全部归一化输出为 #rrggbb 小写形式；
+ * - 校验靠锚定正则逐项匹配，不做黑名单过滤，任何变形（十六进制实体、注释、
+ *   空白夹杂）匹配不上即视为无颜色。
+ */
+const NAMED_COLORS: Record<string, string> = {
+  black: '#000000', silver: '#c0c0c0', gray: '#808080', grey: '#808080',
+  white: '#ffffff', maroon: '#800000', red: '#ff0000', purple: '#800080',
+  fuchsia: '#ff00ff', green: '#008000', lime: '#00ff00', olive: '#808000',
+  yellow: '#ffff00', navy: '#000080', blue: '#0000ff', teal: '#008080',
+  aqua: '#00ffff', orange: '#ffa500',
+};
+
+const toHex2 = (n: number) => n.toString(16).padStart(2, '0');
+
+/** 把任意颜色写法校验并归一化为 #rrggbb；不合法返回 '' */
+export function safeColor(raw: string): string {
+  const v = decodeEntities(raw).trim().toLowerCase().replace(/!important\s*$/, '').trim();
+  const hex = v.match(/^#([0-9a-f]{6})$/);
+  if (hex) return `#${hex[1]}`;
+  const hex3 = v.match(/^#([0-9a-f]{3})$/);
+  if (hex3) return `#${[...hex3[1]].map((c) => c + c).join('')}`;
+  if (NAMED_COLORS[v]) return NAMED_COLORS[v];
+  const rgb = v.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\)$/);
+  if (rgb) {
+    const parts = [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+    if (parts.every((n) => n >= 0 && n <= 255)) return `#${parts.map(toHex2).join('')}`;
+  }
+  return '';
+}
+
+/** 从 style 属性里只提取 color 声明并校验归一化；无合法颜色返回 '' */
+export function styleColorOf(style: string): string {
+  let found = '';
+  for (const decl of decodeEntities(style).split(';')) {
+    const idx = decl.indexOf(':');
+    if (idx === -1) continue;
+    if (decl.slice(0, idx).trim().toLowerCase() !== 'color') continue;
+    const color = safeColor(decl.slice(idx + 1));
+    if (color) found = color; // 多条 color 时后者生效，与 CSS 一致
+  }
+  return found;
+}
 
 /** 这些元素连同内部内容一起丢弃（留文本会泄露脚本/样式源码或产生交互面） */
 const DROP_WITH_CONTENT = new Set([
@@ -150,6 +200,11 @@ function buildAttrs(tag: TagToken): string | null {
   if (name === 'code') {
     return (attrs.get('class') ?? '').trim() === 'inline-code' ? ' class="inline-code"' : '';
   }
+  if (name === 'span') {
+    const color = styleColorOf(attrs.get('style') ?? '');
+    // 无合法颜色 → null：调用方剥掉 span 标签、只留内部文本
+    return color ? ` style="color:${color}"` : null;
+  }
   return '';
 }
 
@@ -159,6 +214,10 @@ export function sanitizeHtml(input: string): string {
   const out: string[] = [];
   const stack: string[] = [];
   let dropDepth: { name: string; depth: number } | null = null;
+  // 被剥掉的无色 span / 无色 font 计数：让它们的结束标签不去误关外层合法 span
+  let ignoredSpans = 0;
+  let ignoredFonts = 0;
+  let fontAsSpan = 0; // 以 span 形式入栈的 font 个数
 
   const closeTo = (name: string) => {
     const idx = stack.lastIndexOf(name);
@@ -186,9 +245,27 @@ export function sanitizeHtml(input: string): string {
         if (!tag.selfClosing) dropDepth = { name: tag.name, depth: 1 };
         continue;
       }
+      if (tag.name === 'font') {
+        // 粘贴来源常见的 <font color>：带合法颜色时映射成受控 span 存活，否则剥标签留文本
+        const color = safeColor(tag.attrs.get('color') ?? '') || styleColorOf(tag.attrs.get('style') ?? '');
+        if (!color) {
+          ignoredFonts++;
+          continue;
+        }
+        out.push(`<span style="color:${color}">`);
+        if (tag.selfClosing) out.push('</span>');
+        else {
+          stack.push('span');
+          fontAsSpan++;
+        }
+        continue;
+      }
       if (!ALLOWED.has(tag.name)) continue; // 未知标签：剥标签，文本保留
       const attrStr = buildAttrs(tag);
-      if (attrStr === null) continue; // a/img 校验不过：剥标签（img 本就无文本）
+      if (attrStr === null) {
+        if (tag.name === 'span') ignoredSpans++; // 无色 span：剥标签留文本
+        continue; // a/img 校验不过：剥标签（img 本就无文本）
+      }
       if (VOID.has(tag.name)) {
         out.push(`<${tag.name}${attrStr} />`);
         continue;
@@ -204,6 +281,17 @@ export function sanitizeHtml(input: string): string {
       if (tag.selfClosing) out.push(`</${tag.name}>`);
       else stack.push(tag.name);
     } else {
+      if (tag.name === 'font') {
+        if (fontAsSpan > 0) {
+          closeTo('span');
+          fontAsSpan--;
+        } else if (ignoredFonts > 0) ignoredFonts--;
+        continue;
+      }
+      if (tag.name === 'span' && ignoredSpans > 0) {
+        ignoredSpans--;
+        continue;
+      }
       if (!ALLOWED.has(tag.name) || VOID.has(tag.name)) continue;
       closeTo(tag.name);
     }

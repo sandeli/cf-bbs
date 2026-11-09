@@ -191,7 +191,44 @@
   var RICH_ALLOWED = {
     P: 1, BR: 1, HR: 1, H2: 1, H3: 1, H4: 1, H5: 1, STRONG: 1, B: 1, EM: 1, I: 1,
     DEL: 1, S: 1, BLOCKQUOTE: 1, UL: 1, OL: 1, LI: 1, PRE: 1, CODE: 1, A: 1, IMG: 1,
+    SPAN: 1, // 仅作文字颜色载体：只保留校验过的 style="color:#rrggbb"
   };
+
+  // 与服务端 sanitize.ts 的 safeColor 同一口径：#hex / rgb(a) / 命名色 → #rrggbb
+  var RICH_NAMED_COLORS = {
+    black: '#000000', silver: '#c0c0c0', gray: '#808080', grey: '#808080',
+    white: '#ffffff', maroon: '#800000', red: '#ff0000', purple: '#800080',
+    fuchsia: '#ff00ff', green: '#008000', lime: '#00ff00', olive: '#808000',
+    yellow: '#ffff00', navy: '#000080', blue: '#0000ff', teal: '#008080',
+    aqua: '#00ffff', orange: '#ffa500',
+  };
+  function richSafeColor(raw) {
+    var v = String(raw == null ? '' : raw).trim().toLowerCase().replace(/!important\s*$/, '').trim();
+    var m = v.match(/^#([0-9a-f]{6})$/);
+    if (m) return '#' + m[1];
+    m = v.match(/^#([0-9a-f]{3})$/);
+    if (m) return '#' + m[1].split('').map(function (c) { return c + c; }).join('');
+    if (RICH_NAMED_COLORS[v]) return RICH_NAMED_COLORS[v];
+    m = v.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\)$/);
+    if (m) {
+      var parts = [Number(m[1]), Number(m[2]), Number(m[3])];
+      if (parts.every(function (n) { return n >= 0 && n <= 255; })) {
+        return '#' + parts.map(function (n) { return ('0' + n.toString(16)).slice(-2); }).join('');
+      }
+    }
+    return '';
+  }
+  function richStyleColor(style) {
+    var found = '';
+    String(style || '').split(';').forEach(function (decl) {
+      var idx = decl.indexOf(':');
+      if (idx === -1) return;
+      if (decl.slice(0, idx).trim().toLowerCase() !== 'color') return;
+      var color = richSafeColor(decl.slice(idx + 1));
+      if (color) found = color;
+    });
+    return found;
+  }
   var RICH_DROP = {
     SCRIPT: 1, STYLE: 1, IFRAME: 1, OBJECT: 1, EMBED: 1, FORM: 1, TEXTAREA: 1,
     SELECT: 1, BUTTON: 1, INPUT: 1, SVG: 1, MATH: 1, TITLE: 1, NOSCRIPT: 1,
@@ -225,6 +262,21 @@
           continue;
         }
         cleanRichNode(child);
+        if (tag === 'FONT') {
+          // <font color> 映射成受控颜色 span；无合法颜色则剥标签留内容
+          var fcolor = richSafeColor(child.getAttribute('color') || '') || richStyleColor(child.getAttribute('style'));
+          if (fcolor) {
+            var nspan = document.createElement('span');
+            nspan.setAttribute('style', 'color:' + fcolor);
+            while (child.firstChild) nspan.appendChild(child.firstChild);
+            node.replaceChild(nspan, child);
+          } else {
+            while (child.firstChild) node.insertBefore(child.firstChild, child);
+            node.removeChild(child);
+          }
+          child = next;
+          continue;
+        }
         if (!RICH_ALLOWED[tag]) {
           // 未知标签：剥标签，保留内部内容
           while (child.firstChild) node.insertBefore(child.firstChild, child);
@@ -257,6 +309,9 @@
           if (lang && /^[a-z0-9+#-]{1,20}$/i.test(lang)) keep['data-lang'] = lang;
         } else if (tag === 'CODE') {
           if (child.getAttribute('class') === 'inline-code') keep['class'] = 'inline-code';
+        } else if (tag === 'SPAN') {
+          var scolor = richStyleColor(child.getAttribute('style'));
+          if (scolor) keep.style = 'color:' + scolor;
         }
         Array.prototype.slice.call(child.attributes || []).forEach(function (a) {
           if (!(a.name in keep)) child.removeAttribute(a.name);
@@ -264,6 +319,13 @@
         Object.keys(keep).forEach(function (k) {
           child.setAttribute(k, keep[k]);
         });
+        if (tag === 'SPAN' && !keep.style) {
+          // 无合法颜色的 span 没有存在意义：剥标签留内容
+          while (child.firstChild) node.insertBefore(child.firstChild, child);
+          node.removeChild(child);
+          child = next;
+          continue;
+        }
       } else if (child.nodeType !== 3) {
         node.removeChild(child);
       }
@@ -484,7 +546,99 @@
 
   // 工具栏按下时不让编辑区丢选区
   document.addEventListener('mousedown', function (e) {
-    if (e.target.closest('[data-cmd]')) e.preventDefault();
+    if (e.target.closest('[data-cmd], [data-color-btn], [data-color]')) e.preventDefault();
+  });
+
+  /* ------------------------------------------------------------ text color */
+
+  function unwrapEl(el) {
+    var p = el.parentNode;
+    if (!p) return;
+    while (el.firstChild) p.insertBefore(el.firstChild, el);
+    p.removeChild(el);
+  }
+
+  function colorSpanAncestor(ed) {
+    var sel = window.getSelection();
+    var node = sel && sel.rangeCount ? sel.anchorNode : null;
+    if (!node || !ed.body.contains(node)) node = ed.range ? ed.range.startContainer : null;
+    while (node && node !== ed.body) {
+      if (node.nodeType === 1 && node.tagName === 'SPAN' && node.style && node.style.color) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+
+  function applyTextColor(ed, color) {
+    restoreRange(ed);
+    if (!color) {
+      // 「默认」：拆掉选区所在的颜色 span（只去颜色，不动加粗等其他格式）
+      var existing = colorSpanAncestor(ed);
+      if (existing) unwrapEl(existing);
+      saveRange(ed);
+      syncRichEditor(ed);
+      return;
+    }
+    var range = currentRange(ed);
+    if (!range) return;
+    var span = document.createElement('span');
+    span.setAttribute('style', 'color:' + color);
+    var sel = window.getSelection();
+    if (range.collapsed) {
+      // 无选区：在光标处放一个带颜色的零宽占位，后续输入即为该颜色
+      span.appendChild(document.createTextNode('​'));
+      range.insertNode(span);
+      var inside = document.createRange();
+      inside.setStart(span.firstChild, 1);
+      inside.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(inside);
+    } else {
+      try {
+        span.appendChild(range.extractContents());
+      } catch (err) {
+        return;
+      }
+      range.insertNode(span);
+      var after = document.createRange();
+      after.setStartAfter(span);
+      after.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(after);
+    }
+    saveRange(ed);
+    syncRichEditor(ed);
+  }
+
+  function closeColorPops(except) {
+    document.querySelectorAll('[data-color-pop]').forEach(function (p) {
+      if (p !== except) p.setAttribute('hidden', '');
+    });
+  }
+
+  document.addEventListener('click', function (e) {
+    var toggle = e.target.closest('[data-color-btn]');
+    if (toggle) {
+      var wrap = toggle.closest('[data-rich-editor]');
+      var pop = wrap ? wrap.querySelector('[data-color-pop]') : null;
+      if (pop) {
+        var willOpen = pop.hasAttribute('hidden');
+        closeColorPops(pop);
+        if (willOpen) pop.removeAttribute('hidden');
+        else pop.setAttribute('hidden', '');
+      }
+      return;
+    }
+    var sw = e.target.closest('[data-color]');
+    if (sw) {
+      var swWrap = sw.closest('[data-rich-editor]');
+      var swEd = swWrap ? editorByWrap(swWrap) : null;
+      var swPop = sw.closest('[data-color-pop]');
+      if (swPop) swPop.setAttribute('hidden', '');
+      if (swEd) applyTextColor(swEd, sw.getAttribute('data-color') || '');
+      return;
+    }
+    if (!e.target.closest('.tool-color')) closeColorPops(null);
   });
 
   document.addEventListener('click', function (e) {
@@ -707,8 +861,6 @@
   /* ------------------------------------------------------------ quote reply */
 
   var replyEd = editorByHiddenId('replyContent');
-  var quoteBar = document.getElementById('quoteBar');
-  var quoteText = document.getElementById('quoteText');
   var replyToInput = document.getElementById('replyToInput');
 
   document.addEventListener('click', function (e) {
@@ -717,10 +869,6 @@
     e.preventDefault();
     var user = btn.getAttribute('data-quote-user');
     if (replyToInput) replyToInput.value = btn.getAttribute('data-quote-post');
-    if (quoteBar && quoteText) {
-      quoteText.textContent = '正在回复 @' + user;
-      quoteBar.removeAttribute('hidden');
-    }
     // 引用以 blockquote 插入回帖编辑器开头，所见即所得；@提及由服务端从正文提取
     replyEd.body.focus();
     var range = document.createRange();
@@ -733,12 +881,6 @@
     insertHtmlAtCaret(replyEd, '<blockquote><p>@' + escText(user) + '</p></blockquote><p><br></p>');
     var form = document.getElementById('replyForm');
     if (form) form.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  });
-
-  document.addEventListener('click', function (e) {
-    if (!e.target.closest('[data-quote-clear]')) return;
-    if (quoteBar) quoteBar.setAttribute('hidden', '');
-    if (replyToInput) replyToInput.value = '';
   });
 
   if (replyEd) {

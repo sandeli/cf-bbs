@@ -228,6 +228,12 @@ export function emptyState(title: string, desc?: string, action?: string): strin
  * 正文以 HTML 提交、服务端白名单 sanitize 后入库（见 lib/sanitize.ts）；
  * initialHtml 只用于回填草稿外的服务端内容，必须是已 sanitize 的可信 HTML。
  */
+/** 文字颜色预设（色板）；服务端 sanitize 接受任意合法 hex，这里只给常用色 */
+export const RICH_COLOR_PRESETS = [
+  '#111111', '#6b7280', '#e03131', '#f76707', '#f08c00',
+  '#2f9e44', '#1971c2', '#7048e8', '#d6336c',
+];
+
 export function richEditor(opts: {
   name: string;
   id: string;
@@ -239,6 +245,15 @@ export function richEditor(opts: {
   const btn = (cmd: string, iconName: string, title: string) =>
     `<button type="button" class="tool-btn" data-cmd="${cmd}" title="${title}" aria-label="${title}">${icon(iconName, 15)}</button>`;
   const sep = '<span class="tool-sep" aria-hidden="true"></span>';
+  const colorControl = `<span class="tool-color">
+      <button type="button" class="tool-btn" data-color-btn title="Text color" aria-label="Text color" aria-haspopup="true"><span class="color-glyph">A</span></button>
+      <span class="color-pop" data-color-pop hidden>
+        <button type="button" class="color-swatch is-default" data-color="" title="Default" aria-label="Default color">A</button>
+        ${RICH_COLOR_PRESETS.map(
+          (c) => `<button type="button" class="color-swatch" data-color="${c}" style="--sw:${c}" title="${c}" aria-label="${c}"></button>`,
+        ).join('')}
+      </span>
+    </span>`;
   return `<div class="rich-editor rich-editor-${opts.size ?? 'md'}" data-rich-editor>
     <div class="composer-tools" role="toolbar">
       ${btn('bold', 'bold', 'Bold')}
@@ -256,6 +271,8 @@ export function richEditor(opts: {
       ${btn('codeblock', 'file', 'Code block')}
       ${sep}
       <button type="button" class="tool-btn" data-cmd="image" ${opts.imageUpload ? 'data-imgbed="1"' : ''} title="Image" aria-label="Image">${icon('image', 15)}</button>
+      ${sep}
+      ${colorControl}
     </div>
     <div class="rich-editor-body md" id="${opts.id}Body" contenteditable="true" data-placeholder="${e(opts.placeholder)}" spellcheck="false">${opts.initialHtml ?? ''}</div>
     <textarea name="${opts.name}" id="${opts.id}" hidden></textarea>

@@ -3,6 +3,7 @@ import type { Ctx } from './types';
 import { detectLocale, translator, isLocale } from './lib/i18n';
 import { loadUser, timingSafeEqual } from './lib/auth';
 import { getSettings, unreadNotifications, unreadConversations, touchUser } from './lib/db';
+import { getSiteUsage } from './lib/usage';
 import {
   clientIp,
   getCookie,
@@ -65,7 +66,11 @@ async function buildContext(req: Request, env: Env, exec: ExecutionContext, para
   const url = new URL(req.url);
   const cookies = parseCookies(req.headers.get('cookie'));
 
-  const [user, settings] = await Promise.all([loadUser(env, req), getSettings(env)]);
+  const [user, settings, usage] = await Promise.all([
+    loadUser(env, req),
+    getSettings(env),
+    getSiteUsage(env).catch(() => null),
+  ]);
   const locale = detectLocale(req, user?.locale, cookies['bbs_lang']);
   const t = translator(locale);
   const siteName = settings.site_name || env.SITE_NAME || 'Nexus';
@@ -110,6 +115,7 @@ async function buildContext(req: Request, env: Env, exec: ExecutionContext, para
     settings,
     unread,
     unreadDm,
+    usage,
     flash,
     html: (body, status = 200, init) => htmlResponse(body, status, init),
     redirect: (path, msg, type = 'ok') => {

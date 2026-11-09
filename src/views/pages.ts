@@ -235,10 +235,6 @@ export function topicPage(
             <span>${e(ctx.t('topic.reply'))}</span>
             <span class="composer-hint">${icon('edit', 13)}${e(ctx.t('compose.markdownTip'))}</span>
           </div>
-          <div class="composer-quote" id="quoteBar" hidden>
-            <span id="quoteText"></span>
-            <button type="button" class="icon-btn icon-btn-sm" data-quote-clear>${icon('close', 14)}</button>
-          </div>
           ${richEditor({
             name: 'content',
             id: 'replyContent',

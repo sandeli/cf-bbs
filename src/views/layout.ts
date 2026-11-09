@@ -1,7 +1,8 @@
 import type { Ctx, TopicRow } from '../types';
 import type { Category } from '../lib/types';
 import { categoryDesc, categoryName, siteTagline } from '../lib/i18n';
-import { escapeHtml as e } from '../lib/utils';
+import { escapeHtml as e, formatBytes } from '../lib/utils';
+import { siteRunningDays } from '../lib/usage';
 import { avatar, icon } from './ui';
 import { stats as fetchStats, topMembers } from '../lib/db';
 import { mailConfigured } from '../lib/mail';
@@ -140,29 +141,31 @@ export function footer(ctx: Ctx): string {
       <p class="footer-desc">${e(ctx.t('footer.powered'))}</p>
       <p class="footer-dev">
         <span class="footer-dev-label">${e(ctx.t('footer.developer'))}</span>
-        <a class="footer-dev-link" href="https://www.lovou.pw" target="_blank" rel="noopener noreferrer" title="XFM">XFM</a>
-        <a class="footer-dev-link" href="https://github.com/xfm0797" target="_blank" rel="noopener noreferrer" title="GitHub · xfm0797">${C.github}<span>GitHub</span></a>
-        <a class="footer-dev-link" href="https://t.me/xfm520" target="_blank" rel="noopener noreferrer" title="Telegram · @xfm520">${C.telegram}<span>Telegram</span></a>
+        <span class="footer-dev-link">TaoGe</span>
+        <a class="footer-dev-link" href="https://github.com/sandeli/cf-bbs" target="_blank" rel="noopener noreferrer" title="GitHub · sandeli/cf-bbs">${C.github}<span>GitHub</span></a>
+        <a class="footer-dev-link" href="https://t.me/+3JN3dEpjmi1jNTI1" target="_blank" rel="noopener noreferrer" title="Telegram">${C.telegram}<span>Telegram</span></a>
       </p>
     </div>
-    <div class="footer-col">
-      <h4>${e(ctx.t('footer.community'))}</h4>
-      <a class="footer-link" href="/">${e(ctx.t('nav.home'))}</a>
-      <a class="footer-link" href="/categories">${e(ctx.t('nav.categories'))}</a>
-      <a class="footer-link" href="/search">${e(ctx.t('nav.search'))}</a>
-      <a class="footer-link" href="/tags">${e(ctx.t('tags.title'))}</a>
-    </div>
-    <div class="footer-col">
-      <h4>${e(ctx.t('footer.links'))}</h4>
-      <a class="footer-link" href="/feed.xml">${icon('link', 14)}${e(ctx.t('footer.rss'))}</a>
-      <a class="footer-link" href="/sitemap.xml">Sitemap</a>
-      <a class="footer-link" href="/about">${e(ctx.t('footer.about'))}</a>
+    <div class="footer-col footer-usage">
+      <h4>${e(ctx.t('footer.usage'))}</h4>
+      <p class="footer-uptime">${e(ctx.t('footer.runningDays', { days: siteRunningDays() }))}</p>
+      ${
+        ctx.usage
+          ? `${
+        ctx.usage.dbBytes != null
+          ? `<div class="footer-stat"><span>${e(ctx.t('footer.dbSize'))}</span><strong>${formatBytes(ctx.usage.dbBytes)}</strong></div>`
+          : ctx.usage.dbRows != null
+            ? `<div class="footer-stat"><span>${e(ctx.t('footer.dbRows'))}</span><strong>${ctx.usage.dbRows}</strong></div>`
+            : `<div class="footer-stat"><span>${e(ctx.t('footer.dbSize'))}</span><strong>—</strong></div>`
+      }`
+          : ''
+      }
     </div>
     <div class="footer-col">
       <h4>${e(ctx.t('footer.language'))}</h4>
       ${langSwitch(ctx)}
       <button class="footer-link" type="button" data-theme-toggle>${icon('sun', 14)}${e(ctx.t('nav.theme'))}</button>
-      <span class="footer-copy">© ${new Date().getFullYear()} <a href="https://github.com/xfm0797/cloudflare-workers-bbs-Nexus" target="_blank" rel="noopener noreferrer" title="GitHub · cloudflare-workers-bbs-Nexus">${e(ctx.siteName)}</a></span>
+      <span class="footer-copy">© ${new Date().getFullYear()} <a href="https://github.com/sandeli/cf-bbs" target="_blank" rel="noopener noreferrer" title="GitHub · sandeli/cf-bbs">${e(ctx.siteName)}</a></span>
     </div>
   </div>
 </footer>`;

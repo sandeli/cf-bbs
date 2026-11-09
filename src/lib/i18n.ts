@@ -423,6 +423,10 @@ const zh: Record<string, string> = {
   'footer.themeSystem': '跟随系统',
   'footer.community': '社区',
   'footer.links': '链接',
+  'footer.usage': '本站用量',
+  'footer.runningDays': '本站已运行 {days} 天',
+  'footer.dbSize': '数据库占用',
+  'footer.dbRows': '数据行数',
 
   'error.404title': '页面走丢了',
   'error.404desc': '你访问的页面不存在，或者已被移除。',
@@ -869,6 +873,10 @@ const en: Record<string, string> = {
   'footer.themeSystem': 'System',
   'footer.community': 'Community',
   'footer.links': 'Links',
+  'footer.usage': 'Site usage',
+  'footer.runningDays': 'Online for {days} days',
+  'footer.dbSize': 'Database size',
+  'footer.dbRows': 'Data rows',
 
   'error.404title': 'Page not found',
   'error.404desc': 'The page you are looking for does not exist or has been removed.',

@@ -1,5 +1,6 @@
 import type { Env } from './env';
 import type { Category, Post, Topic, User } from './lib/types';
+import type { SiteUsage } from './lib/usage';
 
 export type Locale = 'zh-CN' | 'en-US';
 
@@ -19,6 +20,8 @@ export interface Ctx {
   settings: Record<string, string>;
   unread: number;
   unreadDm?: number;
+  /** 页脚本站用量；取数失败为 null，页脚只显示建站天数 */
+  usage?: SiteUsage | null;
   flash?: { type: 'ok' | 'error'; text: string } | null;
   html: (body: string, status?: number, init?: ResponseInit) => Response;
   redirect: (path: string, msg?: string, type?: 'ok' | 'error') => Response;
