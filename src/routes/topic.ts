@@ -13,6 +13,8 @@ import {
   notifyMentions,
 } from '../lib/db';
 import { isMuted } from '../lib/db';
+import type { ContentFormat } from '../lib/db';
+import { htmlToText } from '../lib/sanitize';
 import { buildSidebar } from '../views/layout';
 import { composePage, errorPage, topicPage } from '../views/pages';
 import { parseIntParam } from '../lib/utils';
@@ -94,7 +96,10 @@ post('/new', async (ctx) => {
   }
 
   const title = String(ctx.form?.get('title') || '').trim();
-  const content = String(ctx.form?.get('content') || '').trim();
+  // format=html 为新版所见即所得编辑器提交：正文是 HTML，长度按纯文本计，HTML 原文另设上限
+  const format: ContentFormat = String(ctx.form?.get('format') || '') === 'html' ? 'html' : 'md';
+  const rawContent = String(ctx.form?.get('content') || '');
+  const content = format === 'html' ? rawContent.slice(0, 60000) : rawContent.trim();
   const categoryId = Number.parseInt(String(ctx.form?.get('category_id') || ''), 10);
   const rawTags = String(ctx.form?.get('tags') || '');
 
@@ -108,7 +113,8 @@ post('/new', async (ctx) => {
   };
 
   if (title.length < 4 || title.length > 120) return back(ctx.t('compose.errorTitle'));
-  if (content.length < 10 || content.length > 20000) return back(ctx.t('compose.errorContent'));
+  const textLength = format === 'html' ? htmlToText(content).length : content.length;
+  if (textLength < 10 || textLength > 20000) return back(ctx.t('compose.errorContent'));
 
   const tags = rawTags
     .split(/[,，\s]+/)
@@ -122,6 +128,7 @@ post('/new', async (ctx) => {
     title,
     content,
     tags,
+    format,
   });
 
   const topic = await getTopic(ctx.env, topicId);
@@ -129,7 +136,7 @@ post('/new', async (ctx) => {
     .bind(topicId)
     .first<{ id: number }>();
   if (topic && firstPost) {
-    await notifyMentions(ctx.env, content, ctx.user, topicId, firstPost.id);
+    await notifyMentions(ctx.env, content, ctx.user, topicId, firstPost.id, format);
   }
 
   return ctx.redirect(`/t/${topicId}`, 'compose.success');
@@ -146,8 +153,11 @@ post('/t/:id/reply', async (ctx) => {
   if (!topic || topic.is_deleted) return ctx.html(errorPage(ctx, 404), 404);
   if (topic.is_locked) return ctx.html(errorPage(ctx, 403, ctx.t('error.topicLocked')), 403);
 
-  const content = String(ctx.form?.get('content') || '').trim().slice(0, 20000);
-  if (content.length < 2) return ctx.redirect(`/t/${id}`, 'compose.errorContent', 'error');
+  const format: ContentFormat = String(ctx.form?.get('format') || '') === 'html' ? 'html' : 'md';
+  const rawContent = String(ctx.form?.get('content') || '');
+  const content = format === 'html' ? rawContent.slice(0, 60000) : rawContent.trim().slice(0, 20000);
+  const textLength = format === 'html' ? htmlToText(content).length : content.length;
+  if (textLength < 2 || textLength > 20000) return ctx.redirect(`/t/${id}`, 'compose.errorContent', 'error');
 
   const replyToRaw = String(ctx.form?.get('reply_to') || '');
   const replyTo = Number.parseInt(replyToRaw, 10);
@@ -168,6 +178,7 @@ post('/t/:id/reply', async (ctx) => {
     authorId: ctx.user.id,
     content,
     replyToPostId: replyToId,
+    format,
   });
 
   await notify(ctx.env, {
@@ -180,7 +191,7 @@ post('/t/:id/reply', async (ctx) => {
   if (replyToAuthor) {
     await notify(ctx.env, { userId: replyToAuthor, actorId: ctx.user.id, type: 'reply', topicId: id, postId });
   }
-  await notifyMentions(ctx.env, content, ctx.user, id, postId);
+  await notifyMentions(ctx.env, content, ctx.user, id, postId, format);
 
   const total = topic.reply_count + 2;
   const lastPage = Math.ceil(total / POSTS_PER_PAGE);

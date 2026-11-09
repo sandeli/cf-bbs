@@ -86,7 +86,7 @@ get('/about', (ctx) => {
 
 - 边缘渲染，全球访问延迟极低
 - 零第三方运行时依赖，包体积小
-- 支持 Markdown、点赞、收藏、通知与举报
+- 支持富文本编辑、点赞、收藏、通知与举报
 - 支持 GitHub / Google / GitLab / Gitee / Discord / OIDC 登录
 
 ### 社区准则
@@ -102,7 +102,7 @@ A lightweight community running on **Cloudflare Workers + D1**:
 
 - Edge-rendered for low latency worldwide
 - Zero third-party runtime dependencies
-- Markdown, likes, bookmarks, notifications and reports
+- Rich text editing, likes, bookmarks, notifications and reports
 - Sign in with GitHub / Google / GitLab / Gitee / Discord / OIDC
 
 ### Guidelines

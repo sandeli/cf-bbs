@@ -54,6 +54,10 @@ export const ICONS: Record<string, string> = {
   listIcon: '<path d="M8 6h12M8 12h12M8 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>',
   quote: '<path d="M9 7H5.5A1.5 1.5 0 0 0 4 8.5V12h4.5V7Z"/><path d="M20 7h-3.5A1.5 1.5 0 0 0 15 8.5V12h4.5V7Z"/><path d="M4 12v5h4.5M15 12v5h4.5"/>',
   moonSmall: '<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5Z"/>',
+  italic: '<path d="M11 5h7M6.5 19h7M13.5 5l-3 14"/>',
+  strike: '<path d="M15.6 6.4C14.9 5 13.5 4.2 11.9 4.2c-2.3 0-4.1 1.4-4.1 3.4 0 1.2.6 2.1 1.6 2.7M8.2 13.3c-.3.5-.5 1.1-.5 1.7 0 2 1.8 3.8 4.1 3.8 1.7 0 3.1-.7 3.9-1.8M3.5 12h17"/>',
+  heading: '<path d="M5 4.5v15M5 12h6.5M11.5 4.5v15"/>',
+  listOl: '<path d="M10.5 6.5H21M10.5 12H21M10.5 17.5H21"/><path d="M4.2 4.4 5.9 3.4v4.3M3.9 14.7c.6-1.1 3-1.2 3 .3 0 1.1-2.1 1.5-3 2.8h3.2"/>',
 };
 
 export function icon(name: string, size = 18, cls = ''): string {
@@ -172,11 +176,10 @@ export function topicRow(ctx: Ctx, topic: TopicRow, opts: { snippet?: string; hi
   const snippet = opts.snippet || topic.search_snippet;
   const terms = (opts.highlight || []).filter(Boolean);
   const title = terms.length ? highlightText(topic.title, terms) : e(topic.title);
-  const summary = snippet
-    ? `<p class="topic-row-snippet">${snippet}</p>`
-    : topic.excerpt
-      ? `<p class="topic-row-excerpt">${e(topic.excerpt)}</p>`
-      : '';
+  // 列表卡片不渲染摘要行（常与标题重复、徒增卡高，用户 2026-11-09 定）；
+  // 搜索结果走 snippet 高亮摘要，对找内容有用，保留。excerpt 字段本身仍供
+  // 搜索匹配、RSS 与页面 meta description 使用，只是不再出现在卡片里。
+  const summary = snippet ? `<p class="topic-row-snippet">${snippet}</p>` : '';
 
   return `<article class="topic-row">
     <a class="topic-row-avatar" href="/u/${e(topic.author_username)}" aria-label="${e(author)}">
@@ -214,5 +217,48 @@ export function emptyState(title: string, desc?: string, action?: string): strin
     <h3>${e(title)}</h3>
     ${desc ? `<p>${e(desc)}</p>` : ''}
     ${action || ''}
+  </div>`;
+}
+
+/* ------------------------------------------------------------------ 富文本编辑器 */
+
+/**
+ * 所见即所得编辑器（contenteditable + public/app.js 的零依赖引擎）。
+ * 结构：工具栏 + 可编辑区 + 隐藏 textarea（真正提交的字段）+ format=html 标记。
+ * 正文以 HTML 提交、服务端白名单 sanitize 后入库（见 lib/sanitize.ts）；
+ * initialHtml 只用于回填草稿外的服务端内容，必须是已 sanitize 的可信 HTML。
+ */
+export function richEditor(opts: {
+  name: string;
+  id: string;
+  size?: 'sm' | 'md' | 'lg';
+  placeholder: string;
+  imageUpload?: boolean;
+  initialHtml?: string;
+}): string {
+  const btn = (cmd: string, iconName: string, title: string) =>
+    `<button type="button" class="tool-btn" data-cmd="${cmd}" title="${title}" aria-label="${title}">${icon(iconName, 15)}</button>`;
+  const sep = '<span class="tool-sep" aria-hidden="true"></span>';
+  return `<div class="rich-editor rich-editor-${opts.size ?? 'md'}" data-rich-editor>
+    <div class="composer-tools" role="toolbar">
+      ${btn('bold', 'bold', 'Bold')}
+      ${btn('italic', 'italic', 'Italic')}
+      ${btn('strike', 'strike', 'Strikethrough')}
+      ${sep}
+      ${btn('heading', 'heading', 'Heading')}
+      ${btn('link', 'link', 'Link')}
+      ${sep}
+      ${btn('quote', 'quote', 'Quote')}
+      ${btn('ul', 'listIcon', 'Bulleted list')}
+      ${btn('ol', 'listOl', 'Numbered list')}
+      ${sep}
+      ${btn('inlinecode', 'code', 'Inline code')}
+      ${btn('codeblock', 'file', 'Code block')}
+      ${sep}
+      <button type="button" class="tool-btn" data-cmd="image" ${opts.imageUpload ? 'data-imgbed="1"' : ''} title="Image" aria-label="Image">${icon('image', 15)}</button>
+    </div>
+    <div class="rich-editor-body md" id="${opts.id}Body" contenteditable="true" data-placeholder="${e(opts.placeholder)}" spellcheck="false">${opts.initialHtml ?? ''}</div>
+    <textarea name="${opts.name}" id="${opts.id}" hidden></textarea>
+    <input type="hidden" name="format" value="html" />
   </div>`;
 }

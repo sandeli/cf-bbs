@@ -10,6 +10,8 @@ import {
 import { conversationPage, messagesPage } from '../views/messages';
 import { errorPage } from '../views/pages';
 import { isMuted } from '../lib/db';
+import type { ContentFormat } from '../lib/db';
+import { htmlToText } from '../lib/sanitize';
 
 const PER_PAGE = 50;
 
@@ -69,8 +71,13 @@ post('/messages/:id', async (ctx) => {
   if (!ctx.user) return ctx.redirect('/login');
   if (isMuted(ctx.user)) return ctx.redirect(`/messages/${ctx.params.id}`, 'user.muted', 'error');
   const id = Number(ctx.params.id);
-  const body = String(ctx.form?.get('body') || '').trim().slice(0, 5000);
-  if (!body) return ctx.redirect(`/messages/${ctx.params.id}`, 'dm.emptyBody', 'error');
+  // format=html 为新版所见即所得编辑器提交：长度按纯文本计（上限 5000），HTML 原文另设上限
+  const format: ContentFormat = String(ctx.form?.get('format') || '') === 'html' ? 'html' : 'md';
+  const rawBody = String(ctx.form?.get('body') || '');
+  const body = format === 'html' ? rawBody.slice(0, 60000) : rawBody.trim().slice(0, 5000);
+  const textLength = format === 'html' ? htmlToText(body).length : body.length;
+  if (!body || textLength === 0) return ctx.redirect(`/messages/${ctx.params.id}`, 'dm.emptyBody', 'error');
+  if (textLength > 5000) return ctx.redirect(`/messages/${ctx.params.id}`, 'compose.errorContent', 'error');
 
   const conv = await getConversation(ctx.env, id, ctx.user.id);
   if (!conv) return ctx.html(errorPage(ctx, 404, ctx.t('dm.notFound')), 404);
@@ -78,7 +85,7 @@ post('/messages/:id', async (ctx) => {
     return ctx.redirect(`/messages/${id}`, 'dm.banned', 'error');
   }
 
-  await sendMessage(ctx.env, id, ctx.user.id, body);
+  await sendMessage(ctx.env, id, ctx.user.id, body, format);
   return ctx.redirect(`/messages/${id}`);
 });
 

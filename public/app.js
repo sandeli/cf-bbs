@@ -102,7 +102,7 @@
         d.removeAttribute('open');
       });
     }
-    if (e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) {
+    if (e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName) && !document.activeElement.isContentEditable) {
       var input = document.querySelector('.header-search input, .mobile-search input, .search-big input');
       if (input) {
         e.preventDefault();
@@ -184,116 +184,323 @@
     }
   });
 
-  /* ---------------------------------------------------------------- composer */
+  /* ---------------------------------------------------------------- rich editor (WYSIWYG) */
 
-  function updateCounter(el) {
-    var target = document.querySelector('[data-counter-for="' + el.id + '"]');
-    if (!target) return;
-    var max = el.getAttribute('maxlength') || '20000';
-    target.textContent = el.value.length + ' / ' + max;
+  // 与服务端 src/lib/sanitize.ts 同一白名单口径。前端清洗只为粘贴/插入时
+  // 即时呈现干净，所见即所得；入库前服务端会再清洗一遍，前端过滤不是安全防线。
+  var RICH_ALLOWED = {
+    P: 1, BR: 1, HR: 1, H2: 1, H3: 1, H4: 1, H5: 1, STRONG: 1, B: 1, EM: 1, I: 1,
+    DEL: 1, S: 1, BLOCKQUOTE: 1, UL: 1, OL: 1, LI: 1, PRE: 1, CODE: 1, A: 1, IMG: 1,
+  };
+  var RICH_DROP = {
+    SCRIPT: 1, STYLE: 1, IFRAME: 1, OBJECT: 1, EMBED: 1, FORM: 1, TEXTAREA: 1,
+    SELECT: 1, BUTTON: 1, INPUT: 1, SVG: 1, MATH: 1, TITLE: 1, NOSCRIPT: 1,
+    TEMPLATE: 1, LINK: 1, META: 1, BASE: 1, AUDIO: 1, VIDEO: 1, SOURCE: 1,
+    TRACK: 1, CANVAS: 1, FRAME: 1, FRAMESET: 1, APPLET: 1, XMP: 1,
+  };
+
+  function escText(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function escAttr(s) {
+    return escText(s).replace(/"/g, '&quot;');
   }
 
-  document.querySelectorAll('textarea[maxlength]').forEach(function (el) {
-    updateCounter(el);
-    el.addEventListener('input', function () {
-      updateCounter(el);
-    });
-  });
+  function richSafeUrl(raw, forImage) {
+    var url = String(raw == null ? '' : raw).replace(/[\s"'<>`\u0000-\u0020]/g, '');
+    if (/^https?:\/\//i.test(url)) return url;
+    if (!forImage && url.charAt(0) === '/' && url.charAt(1) !== '/') return url;
+    return '';
+  }
 
-  // 引用回复
-  var replyBox = document.getElementById('replyContent');
-  var quoteBar = document.getElementById('quoteBar');
-  var quoteText = document.getElementById('quoteText');
-  var replyToInput = document.getElementById('replyToInput');
-
-  document.addEventListener('click', function (e) {
-    var btn = e.target.closest('[data-quote-post]');
-    if (!btn || !replyBox) return;
-    e.preventDefault();
-    var user = btn.getAttribute('data-quote-user');
-    var postId = btn.getAttribute('data-quote-post');
-    replyBox.value = '> @' + user + ' \n\n' + replyBox.value;
-    if (replyToInput) replyToInput.value = postId;
-    if (quoteBar && quoteText) {
-      quoteText.textContent = '正在回复 @' + user;
-      quoteBar.removeAttribute('hidden');
-    }
-    replyBox.focus();
-    replyBox.setSelectionRange(replyBox.value.length, replyBox.value.length);
-    updateCounter(replyBox);
-    var form = document.getElementById('replyForm');
-    if (form) form.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  });
-
-  document.addEventListener('click', function (e) {
-    if (!e.target.closest('[data-quote-clear]')) return;
-    if (quoteBar) quoteBar.setAttribute('hidden', '');
-    if (replyToInput) replyToInput.value = '';
-  });
-
-  if (replyBox) {
-    replyBox.addEventListener('keydown', function (e) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-        var form = document.getElementById('replyForm');
-        if (form) form.requestSubmit();
+  function cleanRichNode(node) {
+    var child = node.firstChild;
+    while (child) {
+      var next = child.nextSibling;
+      if (child.nodeType === 1) {
+        var tag = child.tagName;
+        if (RICH_DROP[tag]) {
+          node.removeChild(child);
+          child = next;
+          continue;
+        }
+        cleanRichNode(child);
+        if (!RICH_ALLOWED[tag]) {
+          // 未知标签：剥标签，保留内部内容
+          while (child.firstChild) node.insertBefore(child.firstChild, child);
+          node.removeChild(child);
+          child = next;
+          continue;
+        }
+        var keep = {};
+        if (tag === 'A') {
+          var href = richSafeUrl(child.getAttribute('href'), false);
+          if (href) {
+            keep.href = href;
+            keep.target = '_blank';
+            keep.rel = 'nofollow noopener noreferrer';
+          }
+        } else if (tag === 'IMG') {
+          var src = richSafeUrl(child.getAttribute('src'), true);
+          if (!src) {
+            node.removeChild(child);
+            child = next;
+            continue;
+          }
+          keep.src = src;
+          var alt = child.getAttribute('alt');
+          if (alt) keep.alt = alt;
+          keep.loading = 'lazy';
+        } else if (tag === 'PRE') {
+          if (child.getAttribute('class') === 'code-block') keep['class'] = 'code-block';
+          var lang = child.getAttribute('data-lang');
+          if (lang && /^[a-z0-9+#-]{1,20}$/i.test(lang)) keep['data-lang'] = lang;
+        } else if (tag === 'CODE') {
+          if (child.getAttribute('class') === 'inline-code') keep['class'] = 'inline-code';
+        }
+        Array.prototype.slice.call(child.attributes || []).forEach(function (a) {
+          if (!(a.name in keep)) child.removeAttribute(a.name);
+        });
+        Object.keys(keep).forEach(function (k) {
+          child.setAttribute(k, keep[k]);
+        });
+      } else if (child.nodeType !== 3) {
+        node.removeChild(child);
       }
+      child = next;
+    }
+  }
+
+  function cleanRichHtml(html) {
+    var box = document.createElement('div');
+    box.innerHTML = html || '';
+    cleanRichNode(box);
+    return box.innerHTML;
+  }
+
+  /* ------------------------------------------------------------ editor registry */
+
+  var richEditors = [];
+
+  function editorByWrap(wrap) {
+    for (var i = 0; i < richEditors.length; i++) if (richEditors[i].wrap === wrap) return richEditors[i];
+    return null;
+  }
+  function editorByHiddenId(id) {
+    for (var i = 0; i < richEditors.length; i++) if (richEditors[i].hidden.id === id) return richEditors[i];
+    return null;
+  }
+
+  function richTextLength(body) {
+    var t = body.innerText || body.textContent || '';
+    return t.replace(/\n+$/, '').length;
+  }
+
+  function syncRichEditor(ed) {
+    ed.hidden.value = ed.body.innerHTML;
+    var target = document.querySelector('[data-counter-for="' + ed.hidden.id + '"]');
+    if (target) target.textContent = richTextLength(ed.body) + ' / ' + ed.max;
+    var empty = !(ed.body.textContent || '').trim() && !ed.body.querySelector('img, pre, hr');
+    ed.body.classList.toggle('is-empty', empty);
+  }
+
+  function saveRange(ed) {
+    var sel = window.getSelection();
+    if (sel && sel.rangeCount && ed.body.contains(sel.anchorNode)) {
+      ed.range = sel.getRangeAt(0).cloneRange();
+    }
+  }
+  function restoreRange(ed) {
+    ed.body.focus();
+    if (!ed.range) return;
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(ed.range);
+  }
+  function currentRange(ed) {
+    var sel = window.getSelection();
+    if (sel && sel.rangeCount && ed.body.contains(sel.anchorNode)) return sel.getRangeAt(0);
+    return null;
+  }
+  function insertHtmlAtCaret(ed, html) {
+    restoreRange(ed);
+    document.execCommand('insertHTML', false, html);
+    saveRange(ed);
+    syncRichEditor(ed);
+  }
+
+  function blockAncestor(ed, tags) {
+    var sel = window.getSelection();
+    var node = sel && sel.rangeCount ? sel.anchorNode : null;
+    if (!node || !ed.body.contains(node)) node = ed.range ? ed.range.startContainer : null;
+    while (node && node !== ed.body) {
+      if (node.nodeType === 1 && tags.indexOf(node.tagName) !== -1) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+
+  function refreshToolbar(ed) {
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !ed.body.contains(sel.anchorNode)) return;
+    ed.wrap.querySelectorAll('[data-cmd]').forEach(function (btn) {
+      var cmd = btn.getAttribute('data-cmd');
+      var active = false;
+      try {
+        if (cmd === 'bold') active = document.queryCommandState('bold');
+        else if (cmd === 'italic') active = document.queryCommandState('italic');
+        else if (cmd === 'strike') active = document.queryCommandState('strikeThrough');
+        else if (cmd === 'ul') active = document.queryCommandState('insertUnorderedList');
+        else if (cmd === 'ol') active = document.queryCommandState('insertOrderedList');
+        else if (cmd === 'heading') active = !!blockAncestor(ed, ['H2', 'H3', 'H4', 'H5']);
+        else if (cmd === 'quote') active = !!blockAncestor(ed, ['BLOCKQUOTE']);
+        else if (cmd === 'codeblock') active = !!blockAncestor(ed, ['PRE']);
+        else if (cmd === 'inlinecode') active = !!blockAncestor(ed, ['CODE']) && !blockAncestor(ed, ['PRE']);
+      } catch (err) {}
+      btn.classList.toggle('is-active', !!active);
     });
   }
 
-  /* ---------------------------------------------------------------- markdown toolbar */
+  /* ------------------------------------------------------------ commands */
 
-  function wrapSelection(el, before, after) {
-    var start = el.selectionStart;
-    var end = el.selectionEnd;
-    var selected = el.value.slice(start, end) || '';
-    el.value = el.value.slice(0, start) + before + selected + after + el.value.slice(end);
-    el.selectionStart = start + before.length;
-    el.selectionEnd = start + before.length + selected.length;
-    el.dispatchEvent(new Event('input'));
-    el.focus();
+  function toggleInlineCode(ed) {
+    restoreRange(ed);
+    var codeEl = blockAncestor(ed, ['CODE']);
+    if (codeEl && !blockAncestor(ed, ['PRE'])) {
+      var parent = codeEl.parentNode;
+      while (codeEl.firstChild) parent.insertBefore(codeEl.firstChild, codeEl);
+      parent.removeChild(codeEl);
+      syncRichEditor(ed);
+      return;
+    }
+    var range = currentRange(ed);
+    if (!range) return;
+    if (range.collapsed) {
+      insertHtmlAtCaret(ed, '<code class="inline-code">code</code>');
+      return;
+    }
+    var code = document.createElement('code');
+    code.className = 'inline-code';
+    try {
+      code.appendChild(range.extractContents());
+    } catch (err) {
+      return;
+    }
+    range.insertNode(code);
+    var after = document.createRange();
+    after.setStartAfter(code);
+    after.collapse(true);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(after);
+    saveRange(ed);
+    syncRichEditor(ed);
   }
 
-  document.addEventListener('click', function (e) {
-    var btn = e.target.closest('[data-markdown]');
-    if (!btn) return;
-    var el = btn.closest('form') ? btn.closest('form').querySelector('textarea') : document.getElementById('content');
-    if (!el) return;
-    e.preventDefault();
-    var kind = btn.getAttribute('data-markdown');
-    if (kind === 'bold') wrapSelection(el, '**', '**');
-    if (kind === 'code') wrapSelection(el, '`', '`');
-    if (kind === 'quote') wrapSelection(el, '> ', '');
-    if (kind === 'list') wrapSelection(el, '- ', '');
+  function toggleCodeBlock(ed) {
+    restoreRange(ed);
+    var pre = blockAncestor(ed, ['PRE']);
+    if (pre) {
+      var p = document.createElement('p');
+      p.textContent = pre.textContent;
+      pre.parentNode.replaceChild(p, pre);
+      syncRichEditor(ed);
+      return;
+    }
+    var range = currentRange(ed);
+    if (!range) return;
+    var text = range.collapsed ? 'code' : range.toString();
+    var block = document.createElement('pre');
+    block.className = 'code-block';
+    var inner = document.createElement('code');
+    inner.textContent = text;
+    block.appendChild(inner);
+    range.deleteContents();
+    range.insertNode(block);
+    saveRange(ed);
+    syncRichEditor(ed);
+  }
+
+  function doLink(ed) {
+    var url = window.prompt('链接地址 / Link URL', 'https://');
+    if (url == null) return;
+    var safe = richSafeUrl(url, false);
+    if (!safe) {
+      toast('链接无效 / Invalid link', 'error');
+      return;
+    }
+    restoreRange(ed);
+    var range = currentRange(ed);
+    if (!range || range.collapsed) {
+      insertHtmlAtCaret(
+        ed,
+        '<a href="' + escAttr(safe) + '" target="_blank" rel="nofollow noopener noreferrer">' + escText(safe) + '</a>',
+      );
+      return;
+    }
+    document.execCommand('createLink', false, safe);
+    var anchor = blockAncestor(ed, ['A']);
+    if (anchor) {
+      anchor.setAttribute('target', '_blank');
+      anchor.setAttribute('rel', 'nofollow noopener noreferrer');
+    }
+    saveRange(ed);
+    syncRichEditor(ed);
+  }
+
+  function runRichCommand(ed, cmd, btn) {
+    ed.body.focus();
+    if (cmd === 'bold') document.execCommand('bold');
+    else if (cmd === 'italic') document.execCommand('italic');
+    else if (cmd === 'strike') document.execCommand('strikeThrough');
+    else if (cmd === 'ul') document.execCommand('insertUnorderedList');
+    else if (cmd === 'ol') document.execCommand('insertOrderedList');
+    else if (cmd === 'heading') document.execCommand('formatBlock', false, blockAncestor(ed, ['H2', 'H3', 'H4', 'H5']) ? 'P' : 'H3');
+    else if (cmd === 'quote') document.execCommand('formatBlock', false, blockAncestor(ed, ['BLOCKQUOTE']) ? 'P' : 'BLOCKQUOTE');
+    else if (cmd === 'inlinecode') toggleInlineCode(ed);
+    else if (cmd === 'codeblock') toggleCodeBlock(ed);
+    else if (cmd === 'link') doLink(ed);
+    else if (cmd === 'image') {
+      if (btn.getAttribute('data-imgbed')) {
+        pickImages(ed, btn);
+      } else {
+        var url = window.prompt('图片地址 / Image URL', 'https://');
+        if (url == null) return;
+        var safe = richSafeUrl(url, true);
+        if (!safe) {
+          toast('图片地址无效 / Invalid image URL', 'error');
+          return;
+        }
+        insertHtmlAtCaret(ed, '<img src="' + escAttr(safe) + '" alt="" loading="lazy">');
+      }
+      return;
+    } else {
+      return;
+    }
+    saveRange(ed);
+    syncRichEditor(ed);
+    refreshToolbar(ed);
+  }
+
+  // 工具栏按下时不让编辑区丢选区
+  document.addEventListener('mousedown', function (e) {
+    if (e.target.closest('[data-cmd]')) e.preventDefault();
   });
 
-  /* ---------------------------------------------------------------- image upload */
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-cmd]');
+    if (!btn) return;
+    var wrap = btn.closest('[data-rich-editor]');
+    var ed = wrap ? editorByWrap(wrap) : null;
+    if (!ed) return;
+    e.preventDefault();
+    runRichCommand(ed, btn.getAttribute('data-cmd'), btn);
+  });
+
+  /* ------------------------------------------------------------ image upload */
 
   // 服务端上限见 IMGBED_MAX_MB，这里只做提前提示
   var IMG_MAX_MB = 8;
-
-  function composerTarget(node) {
-    var form = node.closest('form');
-    return form ? form.querySelector('textarea') : document.getElementById('content');
-  }
-
-  function insertText(el, text) {
-    if (el.maxLength > 0 && el.value.length + text.length + 2 > el.maxLength) {
-      toast('内容超出长度上限 / Content too long', 'error');
-      return false;
-    }
-    var start = el.selectionStart == null ? el.value.length : el.selectionStart;
-    var end = el.selectionEnd == null ? el.value.length : el.selectionEnd;
-    var head = el.value.slice(0, start);
-    var tail = el.value.slice(end);
-    var lead = head && !/\n$/.test(head) ? '\n' : '';
-    var block = lead + text + '\n';
-    el.value = head + block + tail;
-    var pos = (head + block).length;
-    el.selectionStart = el.selectionEnd = pos;
-    el.dispatchEvent(new Event('input'));
-    el.focus();
-    return true;
-  }
 
   function uploadErrorText(data) {
     var map = {
@@ -310,7 +517,7 @@
     return map[data.error] || '上传失败 / Upload failed';
   }
 
-  function uploadOne(file, el) {
+  function uploadOne(file, ed) {
     if (!/^image\//.test(file.type || '')) {
       toast('仅支持图片 / Images only', 'error');
       return Promise.resolve();
@@ -328,27 +535,26 @@
       headers: { accept: 'application/json', 'x-csrf-token': csrf() },
     })
       .then(function (r) {
-        return r
-          .json()
-          .catch(function () {
-            return { ok: false, error: 'upstream' };
-          });
+        return r.json().catch(function () {
+          return { ok: false, error: 'upstream' };
+        });
       })
       .then(function (data) {
         if (!data.ok) {
           toast(uploadErrorText(data), 'error');
           return;
         }
-        if (insertText(el, data.markdown || '![](' + data.url + ')')) {
-          toast('已插入图片 / Image inserted');
-        }
+        // /api/upload 返回 html 字段（已按白名单拼好的 <img>）；兜底用 url 自拼
+        var html = data.html || '<img src="' + escAttr(data.url || '') + '" alt="" loading="lazy">';
+        insertHtmlAtCaret(ed, html);
+        toast('已插入图片 / Image inserted');
       })
       .catch(function () {
         toast('上传失败，请检查网络 / Upload failed', 'error');
       });
   }
 
-  function uploadImages(files, el, btn) {
+  function uploadImages(files, ed, btn) {
     var list = [];
     for (var i = 0; i < files.length; i++) {
       if (files[i] && /^image\//.test(files[i].type || '')) list.push(files[i]);
@@ -359,11 +565,11 @@
     }
     if (btn) btn.disabled = true;
     toast(list.length > 1 ? '正在上传 ' + list.length + ' 张… / Uploading' : '正在上传… / Uploading');
-    // 串行上传，保证 markdown 顺序与选择顺序一致
+    // 串行上传，保证插入顺序与选择顺序一致
     var chain = Promise.resolve();
     list.forEach(function (file) {
       chain = chain.then(function () {
-        return uploadOne(file, el);
+        return uploadOne(file, ed);
       });
     });
     chain.then(function () {
@@ -371,7 +577,7 @@
     });
   }
 
-  function pickImages(el, btn) {
+  function pickImages(ed, btn) {
     var input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
@@ -379,28 +585,41 @@
     input.style.display = 'none';
     document.body.appendChild(input);
     input.addEventListener('change', function () {
-      var files = input.files || [];
-      uploadImages(files, el, btn);
+      uploadImages(input.files || [], ed, btn);
       input.remove();
     });
     input.click();
   }
 
-  document.addEventListener('click', function (e) {
-    var btn = e.target.closest('[data-image-upload]');
-    if (!btn) return;
-    e.preventDefault();
-    var el = composerTarget(btn);
-    if (el) pickImages(el, btn);
-  });
+  /* ------------------------------------------------------------ init */
 
-  // 粘贴 / 拖拽：只在带上传入口的编辑框上启用
-  document.querySelectorAll('form textarea').forEach(function (el) {
-    var form = el.closest('form');
-    var btn = form ? form.querySelector('[data-image-upload]') : null;
-    if (!btn) return;
+  document.querySelectorAll('[data-rich-editor]').forEach(function (wrap) {
+    var body = wrap.querySelector('.rich-editor-body');
+    var hidden = wrap.querySelector('textarea');
+    if (!body || !hidden) return;
+    var counter = document.querySelector('[data-counter-for="' + hidden.id + '"]');
+    var max = '20000';
+    if (counter) {
+      var m = counter.textContent.match(/\/\s*(\d+)/);
+      if (m) max = m[1];
+    }
+    var ed = { wrap: wrap, body: body, hidden: hidden, range: null, max: max };
+    richEditors.push(ed);
 
-    el.addEventListener('paste', function (ev) {
+    body.addEventListener('input', function () {
+      syncRichEditor(ed);
+      saveRange(ed);
+    });
+    body.addEventListener('keyup', function () {
+      saveRange(ed);
+      refreshToolbar(ed);
+    });
+    body.addEventListener('mouseup', function () {
+      saveRange(ed);
+      refreshToolbar(ed);
+    });
+
+    body.addEventListener('paste', function (ev) {
       var data = ev.clipboardData;
       if (!data) return;
       var files = [];
@@ -411,88 +630,136 @@
           if (f && /^image\//.test(f.type || '')) files.push(f);
         }
       }
-      if (!files.length) return;
-      ev.preventDefault();
-      uploadImages(files, el, null);
+      if (files.length && wrap.querySelector('[data-imgbed]')) {
+        ev.preventDefault();
+        uploadImages(files, ed, null);
+        return;
+      }
+      var html = '';
+      try {
+        html = data.getData('text/html');
+      } catch (err) {}
+      if (html) {
+        // 带格式粘贴：按服务端同一白名单就地清洗后再插入（服务端入库仍会再清洗）
+        ev.preventDefault();
+        insertHtmlAtCaret(ed, cleanRichHtml(html));
+      }
+      // 纯文本粘贴走浏览器默认行为（自动转义、安全）
     });
 
-    el.addEventListener('dragover', function (ev) {
+    body.addEventListener('dragover', function (ev) {
       if (!ev.dataTransfer) return;
       ev.preventDefault();
-      el.classList.add('is-drop');
+      body.classList.add('is-drop');
     });
-    el.addEventListener('dragleave', function () {
-      el.classList.remove('is-drop');
+    body.addEventListener('dragleave', function () {
+      body.classList.remove('is-drop');
     });
-    el.addEventListener('drop', function (ev) {
+    body.addEventListener('drop', function (ev) {
       if (!ev.dataTransfer) return;
-      el.classList.remove('is-drop');
+      body.classList.remove('is-drop');
       var files = ev.dataTransfer.files;
-      if (!files || !files.length) return;
-      ev.preventDefault();
-      uploadImages(files, el, null);
+      if (files && files.length && wrap.querySelector('[data-imgbed]')) {
+        ev.preventDefault();
+        uploadImages(files, ed, null);
+      }
+    });
+
+    syncRichEditor(ed);
+  });
+
+  document.addEventListener('selectionchange', function () {
+    richEditors.forEach(function (ed) {
+      saveRange(ed);
+      refreshToolbar(ed);
     });
   });
 
-  // 实时预览
-  var previewBtn = document.querySelector('[data-preview-toggle]');
-  if (previewBtn) {
-    previewBtn.addEventListener('click', function () {
-      var area = document.getElementById('content');
-      var box = document.getElementById('previewBox');
-      if (!area || !box) return;
-      if (!box.hasAttribute('hidden')) {
-        box.setAttribute('hidden', '');
-        area.removeAttribute('hidden');
-        return;
+  // 提交前兜底同步（input 事件已保持同步，这里防程序化改动漏网）
+  document.addEventListener(
+    'submit',
+    function (e) {
+      richEditors.forEach(function (ed) {
+        if (e.target.contains(ed.wrap)) syncRichEditor(ed);
+      });
+    },
+    true,
+  );
+
+  /* ------------------------------------------------------------ plain textarea counters */
+
+  // 非富文本的 textarea（如后台/资料表单）仍用字符计数
+  function updateCounter(el) {
+    var target = document.querySelector('[data-counter-for="' + el.id + '"]');
+    if (!target) return;
+    var max = el.getAttribute('maxlength') || '20000';
+    target.textContent = el.value.length + ' / ' + max;
+  }
+
+  document.querySelectorAll('textarea[maxlength]').forEach(function (el) {
+    if (el.closest('[data-rich-editor]')) return;
+    updateCounter(el);
+    el.addEventListener('input', function () {
+      updateCounter(el);
+    });
+  });
+
+  /* ------------------------------------------------------------ quote reply */
+
+  var replyEd = editorByHiddenId('replyContent');
+  var quoteBar = document.getElementById('quoteBar');
+  var quoteText = document.getElementById('quoteText');
+  var replyToInput = document.getElementById('replyToInput');
+
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-quote-post]');
+    if (!btn || !replyEd) return;
+    e.preventDefault();
+    var user = btn.getAttribute('data-quote-user');
+    if (replyToInput) replyToInput.value = btn.getAttribute('data-quote-post');
+    if (quoteBar && quoteText) {
+      quoteText.textContent = '正在回复 @' + user;
+      quoteBar.removeAttribute('hidden');
+    }
+    // 引用以 blockquote 插入回帖编辑器开头，所见即所得；@提及由服务端从正文提取
+    replyEd.body.focus();
+    var range = document.createRange();
+    range.selectNodeContents(replyEd.body);
+    range.collapse(true);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    replyEd.range = range.cloneRange();
+    insertHtmlAtCaret(replyEd, '<blockquote><p>@' + escText(user) + '</p></blockquote><p><br></p>');
+    var form = document.getElementById('replyForm');
+    if (form) form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('[data-quote-clear]')) return;
+    if (quoteBar) quoteBar.setAttribute('hidden', '');
+    if (replyToInput) replyToInput.value = '';
+  });
+
+  if (replyEd) {
+    replyEd.body.addEventListener('keydown', function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        var form = document.getElementById('replyForm');
+        if (form) form.requestSubmit();
       }
-      var fd = new FormData();
-      fd.append('content', area.value);
-      fd.append('_csrf', csrf());
-      fetch('/api/preview', { method: 'POST', body: fd, headers: { accept: 'application/json' } })
-        .then(function (r) {
-          return r.json();
-        })
-        .then(function (data) {
-          if (!data.ok) return;
-          box.innerHTML = data.html || '<p class="muted">—</p>';
-          box.removeAttribute('hidden');
-          area.setAttribute('hidden', '');
-        })
-        .catch(function () {});
     });
   }
 
   /* ---------------------------------------------------------------- 草稿自动保存 */
 
   // 规则：/new 页的标题+正文、主题回复框、私信输入框，按路径维度存 localStorage
-  var draftTargets = [];
-  var newContent = document.getElementById('content');
-  var newTitle = document.getElementById('title');
-  if (newContent && newTitle) {
-    draftTargets.push([newTitle, 'cfbbs-draft:new:title']);
-    draftTargets.push([newContent, 'cfbbs-draft:new:content']);
-  }
-  var replyBox = document.getElementById('replyContent');
-  var topicMatch = location.pathname.match(/^\/t\/(\d+)/);
-  if (replyBox && topicMatch) draftTargets.push([replyBox, 'cfbbs-draft:reply:' + topicMatch[1]]);
-  document.querySelectorAll('.dm-compose textarea[name="body"]').forEach(function (el) {
-    draftTargets.push([el, 'cfbbs-draft:dm:' + location.pathname]);
-  });
-
-  draftTargets.forEach(function (pair) {
-    var el = pair[0];
-    var key = pair[1];
-    var timer = null;
-
+  // 富文本草稿存编辑器 innerHTML（恢复时经同一白名单清洗），标题存纯文本
+  function bindTextDraft(el, key) {
     try {
       var saved = localStorage.getItem(key);
-      if (saved && !el.value) {
-        el.value = saved;
-        el.dispatchEvent(new Event('input', { bubbles: false }));
-      }
+      if (saved && !el.value) el.value = saved;
     } catch (e) {}
-
+    var timer = null;
     el.addEventListener('input', function () {
       if (timer) clearTimeout(timer);
       timer = setTimeout(function () {
@@ -502,8 +769,6 @@
         } catch (e) {}
       }, 600);
     });
-
-    // 提交成功即清除（跟随表单提交；失败时刷新会恢复）
     if (el.form) {
       el.form.addEventListener('submit', function () {
         try {
@@ -511,7 +776,50 @@
         } catch (e) {}
       });
     }
-  });
+  }
+
+  function bindEditorDraft(ed, key) {
+    try {
+      var saved = localStorage.getItem(key);
+      if (saved && !(ed.body.textContent || '').trim() && !ed.body.querySelector('img')) {
+        ed.body.innerHTML = cleanRichHtml(saved);
+        syncRichEditor(ed);
+      }
+    } catch (e) {}
+    var timer = null;
+    ed.body.addEventListener('input', function () {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(function () {
+        try {
+          if ((ed.body.textContent || '').trim()) localStorage.setItem(key, ed.body.innerHTML);
+          else localStorage.removeItem(key);
+        } catch (e) {}
+      }, 600);
+    });
+    var form = ed.wrap.closest('form');
+    if (form) {
+      form.addEventListener('submit', function () {
+        try {
+          localStorage.removeItem(key);
+        } catch (e) {}
+      });
+    }
+  }
+
+  var newTitle = document.getElementById('title');
+  var newEd = editorByHiddenId('content');
+  if (newEd && newTitle) {
+    bindTextDraft(newTitle, 'cfbbs-draft:new:title');
+    bindEditorDraft(newEd, 'cfbbs-draft:new:content');
+  }
+  var topicMatch = location.pathname.match(/^\/t\/(\d+)/);
+  if (replyEd && topicMatch) bindEditorDraft(replyEd, 'cfbbs-draft:reply:' + topicMatch[1]);
+  var dmWrap = document.querySelector('form.dm-compose [data-rich-editor]');
+  if (dmWrap) {
+    var dmEd = editorByWrap(dmWrap);
+    if (dmEd) bindEditorDraft(dmEd, 'cfbbs-draft:dm:' + location.pathname);
+  }
+
 
   /* ---------------------------------------------------------------- auto-grow */
 

@@ -988,26 +988,34 @@ select {
   max-width: 560px;
 }
 
+/* 按钮与统计同一排：统计靠右、数字与文字横排紧凑呈现 */
+.hero-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 22px;
+  margin-top: 14px;
+}
+
 .hero-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-top: 14px;
 }
 
 .hero-stats {
   display: flex;
-  gap: 34px;
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  gap: 24px;
+  margin-left: auto;
 }
 .hero-stats > div {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 5px;
 }
 .hero-stats strong {
-  font-size: 21px;
+  font-size: 17px;
   line-height: 1.2;
   letter-spacing: -0.02em;
 }
@@ -1140,17 +1148,6 @@ select {
 .topic-row-title a {
   transition: color 0.14s;
   word-break: break-word;
-}
-
-.topic-row-excerpt {
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--text-3);
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  margin-bottom: 3px;
 }
 
 .topic-row-meta {
@@ -2177,6 +2174,66 @@ select {
   background: var(--surface-2);
 }
 
+/* ------------------------------------------------------------------ 富文本编辑器 */
+
+.rich-editor {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.rich-editor:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 15%, transparent);
+}
+.rich-editor > .composer-tools {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.rich-editor .tool-btn.is-active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.rich-editor .tool-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 4px;
+}
+.rich-editor-body {
+  padding: 10px 12px;
+  outline: none;
+  overflow-wrap: anywhere;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.rich-editor-sm .rich-editor-body {
+  min-height: 64px;
+}
+.rich-editor-md .rich-editor-body {
+  min-height: 120px;
+}
+.rich-editor-lg .rich-editor-body {
+  min-height: 248px;
+}
+.rich-editor-body.is-empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-3);
+  pointer-events: none;
+  display: block;
+}
+.rich-editor-body.is-drop {
+  background: var(--primary-soft);
+  outline: 2px dashed var(--primary);
+  outline-offset: -3px;
+}
+.dm-compose .rich-editor {
+  flex: 1;
+  min-width: 0;
+}
+
 /* ------------------------------------------------------------------ pagination */
 
 .pagination {
@@ -3105,8 +3162,9 @@ select {
     border-radius: var(--radius);
   }
   .hero-stats {
-    gap: 20px;
+    gap: 16px 20px;
     flex-wrap: wrap;
+    margin-left: 0;
   }
   .header-inner {
     gap: 10px;
@@ -3127,9 +3185,6 @@ select {
   }
   .topic-row-stats {
     display: none;
-  }
-  .topic-row-excerpt {
-    -webkit-line-clamp: 2;
   }
   .post-card {
     grid-template-columns: 1fr;

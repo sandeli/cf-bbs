@@ -38,10 +38,10 @@ export function buildMatchQuery(query: string): string | null {
   return terms.map((t) => `"${t.replace(/"/g, '""')}"`).join(' ');
 }
 
-/** 把 FTS 的 snippet 转成安全 HTML：先转义，再把标记换成 <mark> */
+/** 把 FTS 的 snippet 转成安全 HTML：富文本帖的索引正文含 HTML 标签，先剥标签，再转义并把标记换成 <mark> */
 export function formatSnippet(raw: string | null | undefined): string {
   if (!raw) return '';
-  const cleaned = raw.replace(/\s+/g, ' ').trim();
+  const cleaned = raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   if (!cleaned) return '';
   return escapeHtml(cleaned).split(MARK_START).join('<mark>').split(MARK_END).join('</mark>');
 }

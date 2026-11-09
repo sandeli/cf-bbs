@@ -2,7 +2,7 @@ import type { Ctx, PostRow, TopicRow } from '../types';
 import type { Category, Topic, User } from '../lib/types';
 import { categoryDesc, categoryName, formatDate, formatDateTime, formatRelative, siteTagline } from '../lib/i18n';
 import { escapeHtml as e } from '../lib/utils';
-import { avatar, catChip, csrfField, emptyState, icon, pagination, roleBadge, topicRow } from './ui';
+import { avatar, catChip, csrfField, emptyState, icon, pagination, richEditor, roleBadge, topicRow } from './ui';
 import { layout } from './layout';
 import { enabledProviders } from '../lib/oauth';
 import { imgbedEnabled } from '../lib/imgbed';
@@ -57,15 +57,17 @@ export function homePage(
       )}</span>
       <h1>${e(ctx.t('home.welcome', { site: ctx.siteName }))}</h1>
       <p>${e(siteTagline(ctx, 'home.joinDesc'))}</p>
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="/new">${icon('plus', 16)}${e(ctx.t('home.newTopic'))}</a>
-        <a class="btn btn-outline" href="/categories">${e(ctx.t('home.heroCta'))}${icon('chevronRight', 16)}</a>
-      </div>
-      <div class="hero-stats">
-        <div><strong>${data.stats.topics}</strong><span>${e(ctx.t('home.stats.topics'))}</span></div>
-        <div><strong>${data.stats.posts}</strong><span>${e(ctx.t('home.stats.posts'))}</span></div>
-        <div><strong>${data.stats.users}</strong><span>${e(ctx.t('home.stats.members'))}</span></div>
-        <div><strong>${data.stats.online}</strong><span>${e(ctx.t('home.stats.online'))}</span></div>
+      <div class="hero-row">
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="/new">${icon('plus', 16)}${e(ctx.t('home.newTopic'))}</a>
+          <a class="btn btn-outline" href="/categories">${e(ctx.t('home.heroCta'))}${icon('chevronRight', 16)}</a>
+        </div>
+        <div class="hero-stats">
+          <div><strong>${data.stats.topics}</strong><span>${e(ctx.t('home.stats.topics'))}</span></div>
+          <div><strong>${data.stats.posts}</strong><span>${e(ctx.t('home.stats.posts'))}</span></div>
+          <div><strong>${data.stats.users}</strong><span>${e(ctx.t('home.stats.members'))}</span></div>
+          <div><strong>${data.stats.online}</strong><span>${e(ctx.t('home.stats.online'))}</span></div>
+        </div>
       </div>
     </div>
   </section>
@@ -231,22 +233,19 @@ export function topicPage(
           <div class="composer-head">
             ${avatar({ name: ctx.user.display_name, username: ctx.user.username, url: ctx.user.avatar_url, size: 32 })}
             <span>${e(ctx.t('topic.reply'))}</span>
-            <span class="composer-hint">${icon('code', 13)}${e(ctx.t('compose.markdownTip'))}</span>
-            ${
-              imgbedEnabled(ctx.env)
-                ? `<button type="button" class="tool-btn composer-head-tool" data-image-upload title="${e(
-                    ctx.t('compose.image'),
-                  )}" aria-label="${e(ctx.t('compose.image'))}">${icon('image', 15)}</button>`
-                : ''
-            }
+            <span class="composer-hint">${icon('edit', 13)}${e(ctx.t('compose.markdownTip'))}</span>
           </div>
           <div class="composer-quote" id="quoteBar" hidden>
             <span id="quoteText"></span>
             <button type="button" class="icon-btn icon-btn-sm" data-quote-clear>${icon('close', 14)}</button>
           </div>
-          <textarea class="textarea" name="content" id="replyContent" rows="5" placeholder="${e(
-            ctx.t('topic.replyPlaceholder'),
-          )}" required minlength="2" maxlength="20000"></textarea>
+          ${richEditor({
+            name: 'content',
+            id: 'replyContent',
+            size: 'md',
+            placeholder: ctx.t('topic.replyPlaceholder'),
+            imageUpload: imgbedEnabled(ctx.env),
+          })}
           <div class="composer-foot">
             <span class="char-count" data-counter-for="replyContent">0 / 20000</span>
             <button class="btn btn-primary" type="submit">${icon('reply', 16)}${e(ctx.t('topic.postReply'))}</button>
@@ -409,28 +408,17 @@ export function composePage(ctx: Ctx, categories: Category[], presetCategory?: s
       </div>
       <div class="field">
         <div class="label-row">
-          <label class="label" for="content">${e(ctx.t('compose.contentLabel'))}</label>
-          <div class="composer-tools">
-            ${
-              imgbedEnabled(ctx.env)
-                ? `<button type="button" class="tool-btn" data-image-upload title="${e(ctx.t('compose.image'))}" aria-label="${e(
-                    ctx.t('compose.image'),
-                  )}">${icon('image', 15)}</button>`
-                : ''
-            }
-            <button type="button" class="tool-btn" data-markdown="bold" title="Bold">${icon('bold', 15)}</button>
-            <button type="button" class="tool-btn" data-markdown="code" title="Code">${icon('code', 15)}</button>
-            <button type="button" class="tool-btn" data-markdown="quote" title="Quote">${icon('quote', 15)}</button>
-            <button type="button" class="tool-btn" data-markdown="list" title="List">${icon('listIcon', 15)}</button>
-            <button type="button" class="tool-btn" data-preview-toggle title="${e(ctx.t('compose.preview'))}">${icon('eye', 15)}</button>
-          </div>
+          <label class="label" for="contentBody">${e(ctx.t('compose.contentLabel'))}</label>
         </div>
-        <textarea class="textarea" id="content" name="content" rows="12" required minlength="10" maxlength="20000" placeholder="${e(
-          ctx.t('compose.contentPlaceholder'),
-        )}"></textarea>
-        <div class="md preview-box" id="previewBox" hidden></div>
+        ${richEditor({
+          name: 'content',
+          id: 'content',
+          size: 'lg',
+          placeholder: ctx.t('compose.contentPlaceholder'),
+          imageUpload: imgbedEnabled(ctx.env),
+        })}
         <div class="composer-foot">
-          <span class="hint">${icon('code', 13)}${e(ctx.t('compose.markdownTip'))}</span>
+          <span class="hint">${icon('edit', 13)}${e(ctx.t('compose.markdownTip'))}</span>
           <span class="char-count" data-counter-for="content">0 / 20000</span>
         </div>
       </div>

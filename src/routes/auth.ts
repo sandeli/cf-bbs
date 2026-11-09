@@ -212,8 +212,8 @@ post('/setup', async (ctx) => {
   if (category) {
     const welcome =
       ctx.locale === 'zh-CN'
-        ? `欢迎来到 **${ctx.siteName}**！\n\n这里是一个运行在 Cloudflare Workers + D1 上的社区，支持 Markdown、点赞、收藏、通知与多平台登录。\n\n### 从这里开始\n\n- 在「站点公告」发布你的第一条公告\n- 到「技术分享」聊聊你最近在做的东西\n- 在「问答求助」提出你的问题\n\n祝使用愉快 🎉`
-        : `Welcome to **${ctx.siteName}**!\n\nThis is a community running on Cloudflare Workers + D1 with Markdown, likes, bookmarks, notifications and social login.\n\n### Get started\n\n- Post your first announcement in "Announcements"\n- Share what you are building in "Technology"\n- Ask anything in "Help & Support"\n\nEnjoy 🎉`;
+        ? `欢迎来到 **${ctx.siteName}**！\n\n这里是一个运行在 Cloudflare Workers + D1 上的社区，支持富文本编辑、点赞、收藏、通知与多平台登录。\n\n### 从这里开始\n\n- 在「站点公告」发布你的第一条公告\n- 到「技术分享」聊聊你最近在做的东西\n- 在「问答求助」提出你的问题\n\n祝使用愉快 🎉`
+        : `Welcome to **${ctx.siteName}**!\n\nThis is a community running on Cloudflare Workers + D1 with rich text editing, likes, bookmarks, notifications and social login.\n\n### Get started\n\n- Post your first announcement in "Announcements"\n- Share what you are building in "Technology"\n- Ask anything in "Help & Support"\n\nEnjoy 🎉`;
     await createTopic(ctx.env, {
       categoryId: category.id,
       authorId: id,

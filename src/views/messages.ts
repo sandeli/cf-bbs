@@ -2,7 +2,7 @@ import type { Ctx } from '../types';
 import type { ConversationRow } from '../lib/db';
 import { escapeHtml as e } from '../lib/utils';
 import { formatRelative } from '../lib/i18n';
-import { avatar, csrfField, emptyState, icon, pagination } from './ui';
+import { avatar, csrfField, emptyState, icon, pagination, richEditor } from './ui';
 import { layout } from './layout';
 
 /** 会话列表页 */
@@ -83,7 +83,7 @@ export function conversationPage(
     ${totalPages > 1 ? `<div class="topic-pager">${pagination(ctx, page, totalPages, `/messages/${conv.id}`, new URLSearchParams())}</div>` : ''}
     <form class="dm-compose" method="post" action="/messages/${conv.id}">
       ${csrfField(ctx)}
-      <textarea name="body" rows="3" required placeholder="${e(ctx.t('dm.placeholder'))}" maxlength="5000"></textarea>
+      ${richEditor({ name: 'body', id: 'dmBody', size: 'sm', placeholder: ctx.t('dm.placeholder') })}
       <button class="btn btn-primary" type="submit">${icon('send', 16)}<span>${e(ctx.t('dm.send'))}</span></button>
     </form>`;
 

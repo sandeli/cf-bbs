@@ -3,6 +3,26 @@ import type { Category, Post, Topic, User } from './types';
 import type { TopicRow } from '../types';
 import { excerptOf, slugify } from './utils';
 import { renderMarkdown, extractMentions } from './markdown';
+import { sanitizeHtml, htmlToText, linkifyMentions, excerptFromHtml } from './sanitize';
+
+export type ContentFormat = 'md' | 'html';
+
+/**
+ * 正文写管线（格式感知）：把编辑器/旧客户端提交的正文转成入库三元组。
+ * - md：content 存原文，content_html 存 Markdown 渲染结果（存量行为不变）
+ * - html：content 存服务端白名单 sanitize 后的 HTML（可再编辑），
+ *         content_html 在此基础上做提及链接化，供页面直接展示
+ */
+export function prepareContent(
+  raw: string,
+  format: ContentFormat,
+): { source: string; html: string; excerptSource: string } {
+  if (format === 'html') {
+    const source = sanitizeHtml(raw);
+    return { source, html: linkifyMentions(source), excerptSource: source };
+  }
+  return { source: raw, html: renderMarkdown(raw), excerptSource: raw };
+}
 
 export async function first<T>(env: Env, sql: string, ...params: unknown[]): Promise<T | null> {
   return env.DB.prepare(sql).bind(...params).first<T>();
@@ -215,10 +235,11 @@ export async function getPosts(
 
 export async function createTopic(
   env: Env,
-  input: { categoryId: number; authorId: string; title: string; content: string; tags: string[] },
+  input: { categoryId: number; authorId: string; title: string; content: string; tags: string[]; format?: ContentFormat },
 ): Promise<number> {
   const now = Date.now();
-  const html = renderMarkdown(input.content);
+  const format = input.format ?? 'md';
+  const prepared = prepareContent(input.content, format);
   const res = await env.DB.prepare(
     `INSERT INTO topics (category_id, author_id, title, slug, excerpt, tags, last_post_at, last_poster_id, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -228,7 +249,7 @@ export async function createTopic(
       input.authorId,
       input.title,
       slugify(input.title),
-      excerptOf(input.content),
+      format === 'html' ? excerptFromHtml(prepared.excerptSource) : excerptOf(prepared.excerptSource),
       input.tags.join(','),
       now,
       input.authorId,
@@ -240,8 +261,8 @@ export async function createTopic(
 
   await env.DB.batch([
     env.DB.prepare(
-      `INSERT INTO posts (topic_id, author_id, content, content_html, position, created_at) VALUES (?, ?, ?, ?, 1, ?)`,
-    ).bind(topicId, input.authorId, input.content, html, now),
+      `INSERT INTO posts (topic_id, author_id, content, content_html, content_format, position, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)`,
+    ).bind(topicId, input.authorId, prepared.source, prepared.html, format, now),
     env.DB.prepare('UPDATE topics SET reply_count = 0 WHERE id = ?').bind(topicId),
     env.DB.prepare('UPDATE users SET topic_count = topic_count + 1, post_count = post_count + 1 WHERE id = ?').bind(input.authorId),
     env.DB.prepare('UPDATE categories SET topic_count = topic_count + 1, post_count = post_count + 1 WHERE id = ?').bind(
@@ -254,15 +275,16 @@ export async function createTopic(
 
 export async function createPost(
   env: Env,
-  input: { topicId: number; authorId: string; content: string; replyToPostId?: number | null },
+  input: { topicId: number; authorId: string; content: string; replyToPostId?: number | null; format?: ContentFormat },
 ): Promise<number> {
   const now = Date.now();
-  const html = renderMarkdown(input.content);
+  const format = input.format ?? 'md';
+  const prepared = prepareContent(input.content, format);
   const res = await env.DB.prepare(
-    `INSERT INTO posts (topic_id, author_id, content, content_html, reply_to_post_id, position, created_at)
-     VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM posts WHERE topic_id = ?), ?)`,
+    `INSERT INTO posts (topic_id, author_id, content, content_html, content_format, reply_to_post_id, position, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(position), 0) + 1 FROM posts WHERE topic_id = ?), ?)`,
   )
-    .bind(input.topicId, input.authorId, input.content, html, input.replyToPostId ?? null, input.topicId, now)
+    .bind(input.topicId, input.authorId, prepared.source, prepared.html, format, input.replyToPostId ?? null, input.topicId, now)
     .run();
   const postId = Number(res.meta.last_row_id);
 
@@ -296,8 +318,11 @@ export async function notifyMentions(
   actor: User,
   topicId: number,
   postId: number,
+  format: ContentFormat = 'md',
 ): Promise<void> {
-  const names = extractMentions(content).filter((n) => n.toLowerCase() !== actor.username.toLowerCase());
+  // 富文本正文先转纯文本再提取，保证 <p>@名字</p> 这类紧贴标签的提及也能命中
+  const text = format === 'html' ? htmlToText(content) : content;
+  const names = extractMentions(text).filter((n) => n.toLowerCase() !== actor.username.toLowerCase());
   if (!names.length) return;
   const stmts = names.map((name) =>
     env.DB.prepare(
@@ -591,14 +616,15 @@ export async function sendMessage(
   conversationId: number,
   senderId: string,
   body: string,
+  format: ContentFormat = 'md',
 ): Promise<number> {
   const now = Date.now();
-  const html = renderMarkdown(body);
-  const preview = excerptOf(body).slice(0, 120);
+  const prepared = prepareContent(body, format);
+  const preview = (format === 'html' ? excerptFromHtml(prepared.excerptSource) : excerptOf(prepared.excerptSource)).slice(0, 120);
   const res = await env.DB.prepare(
-    `INSERT INTO messages (conversation_id, sender_id, body, body_html, created_at) VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO messages (conversation_id, sender_id, body, body_html, body_format, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
   )
-    .bind(conversationId, senderId, body, html, now)
+    .bind(conversationId, senderId, prepared.source, prepared.html, format, now)
     .run();
   const messageId = Number(res.meta.last_row_id);
   await env.DB.batch([

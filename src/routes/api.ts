@@ -1,6 +1,6 @@
 import { get, post } from '../router';
-import { toggleBookmark, toggleLike, getTopic } from '../lib/db';
-import { renderMarkdown } from '../lib/markdown';
+import { toggleBookmark, toggleLike, getTopic, prepareContent } from '../lib/db';
+import type { ContentFormat } from '../lib/db';
 import { imgbedConfig, uploadToImgbed } from '../lib/imgbed';
 import { clusterRateLimit, rateLimit } from '../lib/utils';
 import { errorPage } from '../views/pages';
@@ -46,13 +46,15 @@ post('/api/bookmark', async (ctx) => {
 });
 
 post('/api/preview', async (ctx) => {
-  const content = String(ctx.form?.get('content') || '').slice(0, 20000);
-  return ctx.json({ ok: true, html: renderMarkdown(content) });
+  // 兼容端点：md 走 Markdown 渲染，html 走 sanitize + 提及链接化（与正式入库管线一致）
+  const format: ContentFormat = String(ctx.form?.get('format') || '') === 'html' ? 'html' : 'md';
+  const content = String(ctx.form?.get('content') || '').slice(0, format === 'html' ? 60000 : 20000);
+  return ctx.json({ ok: true, html: prepareContent(content, format).html });
 });
 
 /**
  * 图片上传：浏览器 → 本 Worker → 外部图床（认证码不出服务端）
- * 返回 { ok, url, markdown }，前端直接把 markdown 插到光标处。
+ * 返回 { ok, url, markdown, html }：旧 textarea 用 markdown，新版富文本编辑器用 html 插入光标处。
  */
 post('/api/upload', async (ctx) => {
   if (!ctx.user) return ctx.json({ ok: false, error: 'unauthorized' }, 401);
@@ -90,7 +92,13 @@ post('/api/upload', async (ctx) => {
   }
 
   const alt = (file.name || 'image').replace(/[[\]]/g, '').slice(0, 60);
-  return ctx.json({ ok: true, url: result.url, markdown: `![${alt}](${result.url})` });
+  const attr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  return ctx.json({
+    ok: true,
+    url: result.url,
+    markdown: `![${alt}](${result.url})`,
+    html: `<img src="${attr(result.url)}" alt="${attr(alt)}" loading="lazy" decoding="async" />`,
+  });
 });
 
 post('/api/report', async (ctx) => {

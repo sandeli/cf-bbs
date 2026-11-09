@@ -66,6 +66,8 @@ export interface Post {
   author_id: string;
   content: string;
   content_html: string;
+  /** 正文格式：'md' = Markdown 原文（存量），'html' = 富文本 sanitize 后 HTML */
+  content_format: 'md' | 'html';
   reply_to_post_id: number | null;
   position: number;
   is_deleted: number;
