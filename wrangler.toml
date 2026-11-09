@@ -33,7 +33,7 @@ PASSWORD_ITERATIONS = "50000"
 
 # 邮箱验证（Resend）
 # 邮件里的链接默认取请求 origin；自定义域名时建议显式设置 SITE_URL
-SITE_URL = "https://cf-bbs.sandeli79.workers.dev"
+SITE_URL = "https://bbs.taoge.x10.mx"
 # 设为 "true" 后，未验证邮箱的用户不能发帖 / 回复（默认只提示不拦截）
 REQUIRE_EMAIL_VERIFICATION = "true"
 
